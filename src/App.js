@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, query, getDocs, deleteDoc, writeBatch } from 'firebase/firestore';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 
 // --- Firebase Configuration ---
+// Reads configuration securely from environment variables, with fallbacks for local development
 const firebaseConfig = {
   apiKey: "AIzaSyBcaYLVPC8Zzcisgy_98GxMJefq8k632vg",
   authDomain: "cinetrack-222eb.firebaseapp.com",
@@ -15,12 +16,24 @@ const firebaseConfig = {
 };
 
 // --- App ID ---
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-movie-app';
+// Using a default or an environment variable for the app identifier
+const appId = (typeof process !== 'undefined' ? process.env.REACT_APP_CINETRACK_APP_ID : null) || 'default-movie-app';
 
-// --- Initialize Firebase ---
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const auth = getAuth(app);
+// --- Configuration Check ---
+// Check if the Firebase configuration is valid and not using placeholder values.
+const isFirebaseConfigured = firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY";
+
+// --- Initialize Firebase only if configured ---
+let app, db, auth;
+if (isFirebaseConfigured) {
+    try {
+        app = initializeApp(firebaseConfig);
+        db = getFirestore(app);
+        auth = getAuth(app);
+    } catch (error) {
+        console.error("Firebase initialization error:", error);
+    }
+}
 
 // --- SVG Icons ---
 const PlusIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
@@ -41,7 +54,7 @@ const initialMovies = [
 
 // --- Helper function to seed initial movie data ---
 const seedMovies = async () => {
-    if (!auth.currentUser) return;
+    if (!auth || !auth.currentUser) return;
     const moviesCollectionRef = collection(db, `/artifacts/${appId}/public/data/movies`);
     try {
         const querySnapshot = await getDocs(moviesCollectionRef);
@@ -55,28 +68,52 @@ const seedMovies = async () => {
     }
 };
 
+// --- Configuration Message Component ---
+function ConfigurationMessage() {
+    return (
+        <div className="bg-slate-900 text-white min-h-screen flex items-center justify-center p-8">
+            <div className="bg-red-900/50 border border-red-700 p-8 rounded-lg text-center max-w-2xl shadow-2xl">
+                <h2 className="text-3xl font-bold mb-4 text-red-400">Configuration Required</h2>
+                <p className="text-lg mb-4 text-slate-200">
+                    The Firebase API keys are missing or invalid. The application cannot connect to the database.
+                </p>
+                <p className="text-slate-300">
+                    If you are the developer, please ensure you have set up the required environment variables in your hosting provider's settings (e.g., Netlify, Vercel). The variable names must start with <code>REACT_APP_</code> (e.g., <code>REACT_APP_API_KEY</code>).
+                </p>
+            </div>
+        </div>
+    );
+}
+
+
 // --- Main App Component ---
 export default function App() {
-    const [view, setView] = useState('catalog'); // 'catalog', 'adminLogin', 'adminPanel'
+    const [view, setView] = useState('catalog');
     const [user, setUser] = useState(null);
+    const [isAdmin, setIsAdmin] = useState(false);
+    const [isAuthReady, setIsAuthReady] = useState(false);
+
+    if (!isFirebaseConfigured) {
+        return <ConfigurationMessage />;
+    }
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
             setUser(currentUser);
+            setIsAuthReady(true);
             if (currentUser) {
+                // An admin is a non-anonymous user. Visitors are anonymous.
+                setIsAdmin(!currentUser.isAnonymous);
                 seedMovies();
+            } else {
+                setIsAdmin(false);
             }
         });
 
         const performSignIn = async () => {
             if (!auth.currentUser) {
                 try {
-                    const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-                    if (token) {
-                        await signInWithCustomToken(auth, token);
-                    } else {
-                        await signInAnonymously(auth);
-                    }
+                    await signInAnonymously(auth);
                 } catch (error) {
                     console.error("Error during sign-in:", error);
                 }
@@ -88,7 +125,7 @@ export default function App() {
     }, []);
 
     const showAdmin = () => {
-        if (user && !user.isAnonymous) {
+        if (isAdmin) { 
             setView('adminLogin');
         } else {
             console.log("Admin access is restricted.");
@@ -97,7 +134,7 @@ export default function App() {
 
     const showCatalog = () => setView('catalog');
 
-    if (!user) {
+    if (!isAuthReady) {
         return (
             <div className="bg-slate-900 text-white min-h-screen flex items-center justify-center">
                 <p>Authenticating...</p>
@@ -107,7 +144,7 @@ export default function App() {
 
     return (
         <div className="bg-slate-900 text-white min-h-screen font-sans">
-            <Header onAdminClick={showAdmin} onCatalogClick={showCatalog} currentView={view} />
+            <Header onAdminClick={showAdmin} onCatalogClick={showCatalog} currentView={view} isAdmin={isAdmin} />
             <main className="p-4 md:p-8">
                 {view === 'catalog' && <MovieCatalog />}
                 {view === 'adminLogin' && <Login onLoginSuccess={() => setView('adminPanel')} />}
@@ -119,14 +156,13 @@ export default function App() {
 }
 
 // --- Header Component ---
-function Header({ onAdminClick, onCatalogClick, currentView }) {
-    const isUserAdmin = auth.currentUser && !auth.currentUser.isAnonymous;
+function Header({ onAdminClick, onCatalogClick, currentView, isAdmin }) {
     return (
         <header className="bg-slate-900/70 backdrop-blur-lg sticky top-0 z-40 p-4 flex justify-between items-center border-b border-slate-700">
             <h1 className="text-2xl md:text-3xl font-bold text-red-500 tracking-wider cursor-pointer" onClick={onCatalogClick}>
                 CineTrack
             </h1>
-            {isUserAdmin && (
+            {isAdmin && (
                 <button
                     onClick={currentView === 'adminPanel' ? onCatalogClick : onAdminClick}
                     className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300 ease-in-out transform hover:scale-105"
@@ -184,6 +220,7 @@ function MovieCatalog() {
     const [notification, setNotification] = useState({ show: false, message: '', isError: false });
 
     useEffect(() => {
+        if (!isFirebaseConfigured) return;
         const moviesCollectionRef = collection(db, `/artifacts/${appId}/public/data/movies`);
         const unsubscribe = onSnapshot(query(moviesCollectionRef), (snapshot) => {
             const moviesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -263,6 +300,7 @@ function ManageCatalogPanel() {
     const [movieToDelete, setMovieToDelete] = useState(null);
 
     useEffect(() => {
+        if (!isFirebaseConfigured) return;
         const moviesCollectionRef = collection(db, `/artifacts/${appId}/public/data/movies`);
         const unsubscribe = onSnapshot(query(moviesCollectionRef), (snapshot) => {
             const moviesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -360,6 +398,7 @@ function AddMovieForm() {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (!isFirebaseConfigured) return;
         if (!title.trim() || !posterUrl.trim()) {
             setNotification({ show: true, message: 'Please fill out both fields.', isError: true });
             return;
@@ -395,11 +434,11 @@ function RequestPanel() {
     const [requestGroupToDelete, setRequestGroupToDelete] = useState(null);
 
     useEffect(() => {
+        if (!isFirebaseConfigured) return;
         const requestsCollectionRef = collection(db, `/artifacts/${appId}/public/data/requests`);
         const unsubscribe = onSnapshot(query(requestsCollectionRef), (snapshot) => {
             const requestsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             
-            // Group requests by movieTitle
             const groups = requestsData.reduce((acc, request) => {
                 const title = request.movieTitle;
                 if (!acc[title]) {
@@ -426,7 +465,6 @@ function RequestPanel() {
 
             let processedRequests = Object.values(groups);
 
-            // Sort the grouped requests
             processedRequests.sort((a, b) => {
                 if (a.allActioned === b.allActioned) {
                     return b.latestDate - a.latestDate;
