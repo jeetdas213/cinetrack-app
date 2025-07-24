@@ -4,24 +4,22 @@ import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, query, ge
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 
 // --- Firebase Configuration ---
-// Reads configuration securely from environment variables, with fallbacks for local development
+// SECURE: Reads configuration from environment variables.
+// DO NOT PASTE YOUR KEYS HERE. Add them to your Netlify settings.
 const firebaseConfig = {
-  apiKey: "AIzaSyBcaYLVPC8Zzcisgy_98GxMJefq8k632vg",
-  authDomain: "cinetrack-222eb.firebaseapp.com",
-  projectId: "cinetrack-222eb",
-  storageBucket: "cinetrack-222eb.firebasestorage.app",
-  messagingSenderId: "632295986426",
-  appId: "1:632295986426:web:9b983c4f9179e2afa9a543",
-  measurementId: "G-8LH9HKMQHM"
+    apiKey: process.env.REACT_APP_API_KEY,
+    authDomain: process.env.REACT_APP_AUTH_DOMAIN,
+    projectId: process.env.REACT_APP_PROJECT_ID,
+    storageBucket: process.env.REACT_APP_STORAGE_BUCKET,
+    messagingSenderId: process.env.REACT_APP_MESSAGING_SENDER_ID,
+    appId: process.env.REACT_APP_APP_ID
 };
 
 // --- App ID ---
-// Using a default or an environment variable for the app identifier
-const appId = (typeof process !== 'undefined' ? process.env.REACT_APP_CINETRACK_APP_ID : null) || 'default-movie-app';
+const appId = process.env.REACT_APP_CINETRACK_APP_ID || 'default-movie-app';
 
 // --- Configuration Check ---
-// Check if the Firebase configuration is valid and not using placeholder values.
-const isFirebaseConfigured = firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY";
+const isFirebaseConfigured = firebaseConfig.apiKey && !firebaseConfig.apiKey.includes("YOUR_API_KEY");
 
 // --- Initialize Firebase only if configured ---
 let app, db, auth;
@@ -102,7 +100,6 @@ export default function App() {
             setUser(currentUser);
             setIsAuthReady(true);
             if (currentUser) {
-                // An admin is a non-anonymous user. Visitors are anonymous.
                 setIsAdmin(!currentUser.isAnonymous);
                 seedMovies();
             } else {
